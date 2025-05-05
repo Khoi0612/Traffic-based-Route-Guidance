@@ -7,6 +7,7 @@ from sklearn.model_selection import train_test_split
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense, Dropout
 from xgboost import XGBRegressor
+import sys
 
 def process_data(filename, sheet_name='Data'):
     # Read the Excel file
@@ -163,10 +164,19 @@ def evaluate_xgboost_model(model, scaler, x_test, y_test, dates_test):
     plt.tight_layout()
     plt.show()
 
-data = process_data('Scats Data October 2006.xls')
-scaler, (x_train, x_test, y_train, y_test, dates_train, dates_test) = split_data(data, 5, 'location', 'WARRIGAL_RD N of HIGH STREET_RD')
-model, history = train_lstm_model(x_train, y_train)
-evaluate_model(model, history, scaler, x_test, y_test, dates_test)
+def run_traffic_flow_prediction():
+    data = process_data('Scats Data October 2006.xls')
+    scaler, (x_train, x_test, y_train, y_test, dates_train, dates_test) = split_data(processed_data=data, window_size=5, groupby='location', group_name='WARRIGAL_RD N of HIGH STREET_RD')
 
-xgb_model = train_xgboost_model(x_train, y_train)
-evaluate_xgboost_model(xgb_model, scaler, x_test, y_test, dates_test)
+    method = sys.argv[1]
+
+    if method == "lstm":
+        model, history = train_lstm_model(x_train, y_train)
+        evaluate_model(model, history, scaler, x_test, y_test, dates_test)
+    elif method == "xgb":
+        xgb_model = train_xgboost_model(x_train, y_train)
+        evaluate_xgboost_model(xgb_model, scaler, x_test, y_test, dates_test)
+    else:
+        raise ValueError(f"Unsupported method: {method}")    
+
+run_traffic_flow_prediction()
