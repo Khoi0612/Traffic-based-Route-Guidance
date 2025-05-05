@@ -6,6 +6,7 @@ from sklearn.preprocessing import MinMaxScaler
 from sklearn.model_selection import train_test_split
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense, Dropout
+from xgboost import XGBRegressor
 
 def process_data(filename, sheet_name='Data'):
     # Read the Excel file
@@ -101,6 +102,18 @@ def train_lstm_model(x_train, y_train):
 
     return model, history
 
+def train_xgboost_model(x_train, y_train):
+    model = XGBRegressor(
+        n_estimators=100,
+        learning_rate=0.1,
+        max_depth=5,
+        subsample=0.8,
+        colsample_bytree=0.8,
+        random_state=42
+    )
+    model.fit(x_train, y_train)
+    return model
+
 def evaluate_model(model, history, scaler, x_test, y_test, dates_test):
     # Reshape test data to match LSTM input
     x_test = x_test.reshape((x_test.shape[0], x_test.shape[1], 1))
@@ -126,8 +139,34 @@ def evaluate_model(model, history, scaler, x_test, y_test, dates_test):
     plt.legend()
     plt.tight_layout()
     plt.show()
+    
+def evaluate_xgboost_model(model, scaler, x_test, y_test, dates_test):
+    # XGBoost returns flat predictions
+    predictions = model.predict(x_test)
+
+    # Inverse scale
+    predictions = scaler.inverse_transform(predictions.reshape(-1, 1)).flatten()
+    y_test = scaler.inverse_transform(y_test.reshape(-1, 1)).flatten()
+
+    # Calculate RMSE
+    rmse = np.sqrt(np.mean((y_test - predictions) ** 2))
+    print(f'XGBoost RMSE: {rmse:.2f}')
+
+    # Plot results
+    plt.figure(figsize=(12, 6))
+    plt.plot(dates_test, y_test, label='Actual Flow')
+    plt.plot(dates_test, predictions, label='XGBoost Predicted Flow')
+    plt.title('XGBoost: Actual vs Predicted Traffic Flow')
+    plt.xlabel('Date')
+    plt.ylabel('Traffic Flow (cars)')
+    plt.legend()
+    plt.tight_layout()
+    plt.show()
 
 data = process_data('Scats Data October 2006.xls')
 scaler, (x_train, x_test, y_train, y_test, dates_train, dates_test) = split_data(data, 5, 'location', 'WARRIGAL_RD N of HIGH STREET_RD')
 model, history = train_lstm_model(x_train, y_train)
 evaluate_model(model, history, scaler, x_test, y_test, dates_test)
+
+xgb_model = train_xgboost_model(x_train, y_train)
+evaluate_xgboost_model(xgb_model, scaler, x_test, y_test, dates_test)
