@@ -180,3 +180,47 @@ def run_traffic_flow_prediction():
         raise ValueError(f"Unsupported method: {method}")    
 
 run_traffic_flow_prediction()
+
+def predict_flow_for_date(model, data, scaler, location_name, target_datetime, window_size=5):
+    df = data[data['location'] == location_name].copy()
+    df['timestamp'] = pd.to_datetime(df['timestamp'])
+    df.set_index('timestamp', inplace=True)
+
+    if target_datetime not in df.index:
+        print("Target datetime not in dataset.")
+        return None
+
+    past_window = df.loc[:target_datetime].iloc[-(window_size + 1):-1]
+    
+    if len(past_window) < window_size:
+        print("Not enough historical data to make prediction.")
+        return None
+
+    recent_flows = past_window['traffic_flow'].astype(float).values.reshape(-1, 1)
+    scaled_input = scaler.transform(recent_flows)
+    x_input = scaled_input.reshape((1, window_size, 1))
+    
+    prediction_scaled = model.predict(x_input, verbose=0)
+    prediction = round(scaler.inverse_transform(prediction_scaled)[0][0])
+
+    print(f"Predicted traffic flow at {target_datetime}: {prediction:.2f} cars")
+    return prediction
+
+
+data = process_data('Scats Data October 2006.xls')
+scaler, (x_train, x_test, y_train, y_test, dates_train, dates_test) = split_data(data, 5, 'location', 'WARRIGAL_RD N of HIGH STREET_RD')
+model, history = train_lstm_model(x_train, y_train)
+evaluate_model(model, history, scaler, x_test, y_test, dates_test)
+
+from datetime import datetime
+
+target_dt = datetime(2006, 10, 31, 8, 0, 0)
+
+predict_flow_for_date(
+    model=model,
+    data=data,
+    scaler=scaler,
+    location_name='WARRIGAL_RD N of HIGH STREET_RD',
+    target_datetime=target_dt,
+    window_size=5
+)
