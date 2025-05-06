@@ -1,226 +1,259 @@
 import numpy as np
 import pandas as pd
-from datetime import datetime
 import matplotlib.pyplot as plt
-from sklearn.preprocessing import MinMaxScaler
+from datetime import datetime
 from sklearn.model_selection import train_test_split
+import joblib
+import sys
+
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense, Dropout
 from xgboost import XGBRegressor
-import sys
 
-def process_data(filename, sheet_name='Data'):
-    # Read the Excel file
-    raw_data = pd.read_excel(filename, sheet_name=sheet_name, header=None)
+class BaseTrafficPredictionModel:
 
-    # Extract the list of time
-    time_list = raw_data.iloc[0, 10:].tolist()
+    def __init__(self, window_size=5):
+        self.window_size = window_size
+        self.model = None
+        self.scaler = None
 
-    # Initialize lists for each parameter
-    timestamps = []
-    scats_numbers = []
-    locations = []
-    traffic_flows = []
+    def load_data(self, filename):
+        data = pd.read_excel(filename)
+        target_dates = pd.to_datetime(data['timestamp'])
+        
+        # Extract features and target
+        x = data.iloc[:, 0:self.window_size].values
+        y = data['target'].values
+        
+        # Split into train/test sets
+        x_train, x_test, y_train, y_test, dates_train, dates_test = train_test_split(
+            x, y, target_dates, test_size=0.2, shuffle=False
+        )
+        
+        return data, x_train, x_test, y_train, y_test, dates_train, dates_test
 
-    # Start reading data from row 2 (after time and column headers)
-    for row in range(2, len(raw_data)):
-        scat_no = raw_data.iloc[row, 0]
-        location = raw_data.iloc[row, 1]
-        date = raw_data.iloc[row, 9].date()  # Date only
+    def load_scaler(self, scaler_path='scaler.save'):
+        self.scaler = joblib.load(scaler_path)
+        return self.scaler
 
-        # Loop through all time intervals and collect data
-        for i, time in enumerate(time_list):
-            timestamps.append(datetime.combine(date, time))
-            scats_numbers.append(scat_no)
-            locations.append(location)
-            traffic_flows.append(raw_data.iloc[row, 10 + i])
+    def train(self, x_train, y_train):
+        raise NotImplementedError("Subclasses must implement the train method")
 
-    # Create the final processed DataFrame
-    processed_data = pd.DataFrame({
-        'timestamp': timestamps,
-        'scats_number': scats_numbers,
-        'location': locations,
-        'traffic_flow': traffic_flows
-    })
+    def evaluate(self, x_test, y_test, dates_test):
+        raise NotImplementedError("Subclasses must implement the evaluate method")
 
-    return processed_data
+    def predict(self, data, target_datetime):
+        raise NotImplementedError("Subclasses must implement the predict method")
 
-def split_data(processed_data, window_size, groupby='scats_number', group_name='0970'):
-    # Group data by the specified column and get a specific group
-    grouped = processed_data.groupby(groupby)
-    group_df = grouped.get_group(group_name).copy()
 
-    # Set timestamp as the index
-    group_df['timestamp'] = pd.to_datetime(group_df['timestamp'])
-    group_df.set_index('timestamp', inplace=True)
+class LSTMTrafficPredictionModel(BaseTrafficPredictionModel):
 
-    # Extract traffic flow 
-    traffic_flow = group_df['traffic_flow'].astype(float).values.reshape(-1, 1)
+    def __init__(self, window_size=5):
+        super().__init__(window_size)
+        self.model_name = "LSTM"
 
-    # Extract target dates
-    target_dates = group_df.index[window_size:]
+    def train(self, x_train, y_train):
+        # Reshape input to be [samples, time steps, features]
+        x_train = x_train.reshape((x_train.shape[0], x_train.shape[1], 1))
 
-    # Normalize the traffic flow values to range [0, 1]
-    scaler = MinMaxScaler(feature_range=(0, 1))
-    scaled_traffic_flow = scaler.fit_transform(traffic_flow)
+        # Define the LSTM model architecture
+        self.model = Sequential()
+        self.model.add(LSTM(units=128, return_sequences=True, input_shape=(x_train.shape[1], 1)))
+        self.model.add(Dropout(0.2))
+        self.model.add(LSTM(units=128))
+        self.model.add(Dropout(0.2))
+        self.model.add(Dense(1))
 
-    # Prepare sliding window input (x) and corresponding labels (y)
-    x, y = [], []
-    for i in range(window_size, len(scaled_traffic_flow)):
-        x.append(scaled_traffic_flow[i - window_size:i, 0])
-        y.append(scaled_traffic_flow[i, 0])
+        # Compile the model
+        self.model.compile(optimizer='adam', loss='mean_squared_error')
 
-    # Convert to NumPy arrays
-    x = np.array(x)
-    y = np.array(y)
+        # Train the model
+        self.model.fit(
+            x_train, y_train,
+            epochs=100,
+            batch_size=32,
+            validation_split=0.1,
+            verbose=1
+        )
+        
+        return self.model
 
-    # Split data into training and testing sets, and return scaler along with them
-    return scaler, train_test_split(x, y, target_dates, test_size=0.2, shuffle=False)
+    def evaluate(self, x_test, y_test, dates_test):
+        if self.model is None:
+            raise ValueError("Model must be trained before evaluation")
+            
+        if self.scaler is None:
+            raise ValueError("Scaler must be loaded before evaluation")
+            
+        # Reshape test data for LSTM
+        x_test = x_test.reshape((x_test.shape[0], x_test.shape[1], 1))
+        
+        # Make predictions
+        predictions = self.model.predict(x_test)
+        
+        # Inverse transform predictions and actual values
+        predictions = self.scaler.inverse_transform(predictions).flatten()
+        y_test = self.scaler.inverse_transform(y_test.reshape(-1, 1)).flatten()
+        
+        # Calculate RMSE
+        rmse = np.sqrt(np.mean((y_test - predictions) ** 2))
+        print(f'{self.model_name} RMSE: {rmse:.2f}')
+        
+        # Plot results
+        plt.figure(figsize=(12, 6))
+        plt.plot(dates_test, y_test, label='Actual Flow')
+        plt.plot(dates_test, predictions, label=f'{self.model_name} Predicted Flow')
+        plt.title(f'{self.model_name}: Actual vs Predicted Traffic Flow')
+        plt.xlabel('Date')
+        plt.ylabel('Traffic Flow (cars)')
+        plt.legend()
+        plt.tight_layout()
+        plt.show()
+        
+        return rmse, predictions
 
-def train_lstm_model(x_train, y_train):
-    # Reshape input to be [samples, time steps, features]
-    x_train = x_train.reshape((x_train.shape[0], x_train.shape[1], 1))
+    def predict(self, data, target_datetime):
+        if self.model is None:
+            raise ValueError("Model must be trained before prediction")
+            
+        if self.scaler is None:
+            raise ValueError("Scaler must be loaded before prediction")
+            
+        # Ensure target_datetime is datetime type
+        target_datetime = pd.to_datetime(target_datetime)
+        
+        # Find the row that matches the target timestamp
+        row = data[data['timestamp'] == target_datetime]
+        
+        if row.empty:
+            print(f"Target datetime {target_datetime} not found in data.")
+            return None
+            
+        # Extract input features and reshape for LSTM
+        x_input = row.iloc[0, 0:self.window_size].values.reshape((1, self.window_size, 1)).astype('float32')
+        
+        # Make prediction and inverse transform
+        prediction_scaled = self.model.predict(x_input, verbose=0)
+        prediction = self.scaler.inverse_transform(prediction_scaled)[0][0]
+        
+        print(f"Predicted traffic flow at {target_datetime}: {prediction:.2f} cars")
+        return prediction
 
-    # Define the LSTM model architecture
-    model = Sequential()
-    model.add(LSTM(units=128, return_sequences=True, input_shape=(x_train.shape[1], 1))) # First layer
-    model.add(Dropout(0.2))  # Prevent overfitting
-    model.add(LSTM(units=128))  # Final layer
-    model.add(Dropout(0.2))
-    model.add(Dense(1))  # Output layer
 
-    # Compile the model with Adam optimizer and MSE loss
-    model.compile(optimizer='adam', loss='mean_squared_error')
+class XGBoostTrafficPredictionModel(BaseTrafficPredictionModel):
 
-    # Train the model with 10% validation split
-    history = model.fit(
-        x_train, y_train,
-        epochs=100,
-        batch_size=32,
-        validation_split=0.1,
-        verbose=1
-    )
+    def __init__(self, window_size=5):
+        super().__init__(window_size)
+        self.model_name = "XGBoost"
 
-    return model, history
+    def train(self, x_train, y_train):
+        self.model = XGBRegressor(
+            n_estimators=100,
+            learning_rate=0.1,
+            max_depth=5,
+            subsample=0.8,
+            colsample_bytree=0.8,
+            random_state=42
+        )
+        
+        self.model.fit(x_train, y_train)
+        return self.model
 
-def train_xgboost_model(x_train, y_train):
-    model = XGBRegressor(
-        n_estimators=100,
-        learning_rate=0.1,
-        max_depth=5,
-        subsample=0.8,
-        colsample_bytree=0.8,
-        random_state=42
-    )
-    model.fit(x_train, y_train)
-    return model
+    def evaluate(self, x_test, y_test, dates_test):
+        if self.model is None:
+            raise ValueError("Model must be trained before evaluation")
+            
+        if self.scaler is None:
+            raise ValueError("Scaler must be loaded before evaluation")
+            
+        # Make predictions (XGBoost doesn't need reshaping)
+        predictions = self.model.predict(x_test)
+        
+        # Inverse transform predictions and actual values
+        predictions = self.scaler.inverse_transform(predictions.reshape(-1, 1)).flatten()
+        y_test = self.scaler.inverse_transform(y_test.reshape(-1, 1)).flatten()
+        
+        # Calculate RMSE
+        rmse = np.sqrt(np.mean((y_test - predictions) ** 2))
+        print(f'{self.model_name} RMSE: {rmse:.2f}')
+        
+        # Plot results
+        plt.figure(figsize=(12, 6))
+        plt.plot(dates_test, y_test, label='Actual Flow')
+        plt.plot(dates_test, predictions, label=f'{self.model_name} Predicted Flow')
+        plt.title(f'{self.model_name}: Actual vs Predicted Traffic Flow')
+        plt.xlabel('Date')
+        plt.ylabel('Traffic Flow (cars)')
+        plt.legend()
+        plt.tight_layout()
+        plt.show()
+        
+        return rmse, predictions
 
-def evaluate_model(model, history, scaler, x_test, y_test, dates_test):
-    # Reshape test data to match LSTM input
-    x_test = x_test.reshape((x_test.shape[0], x_test.shape[1], 1))
+    def predict(self, data, target_datetime):
+        if self.model is None:
+            raise ValueError("Model must be trained before prediction")
+            
+        if self.scaler is None:
+            raise ValueError("Scaler must be loaded before prediction")
+            
+        # Ensure target_datetime is datetime type
+        target_datetime = pd.to_datetime(target_datetime)
+        
+        # Find the row that matches the target timestamp
+        row = data[data['timestamp'] == target_datetime]
+        
+        if row.empty:
+            print(f"Target datetime {target_datetime} not found in data.")
+            return None
+            
+        # Extract input features
+        x_input = row.iloc[0, 0:self.window_size].values.reshape(1, -1).astype('float32')
+        
+        # Make prediction and inverse transform
+        prediction_scaled = self.model.predict(x_input)
+        prediction = self.scaler.inverse_transform(prediction_scaled.reshape(-1, 1))[0][0]
+        
+        print(f"Predicted traffic flow at {target_datetime}: {prediction:.2f} cars")
+        return prediction
 
-    # Make predictions
-    predictions = model.predict(x_test)
 
-    #  Inverse transform to get actual traffic flow for both predictions and actuals
-    predictions = scaler.inverse_transform(predictions).flatten()
-    y_test = scaler.inverse_transform(y_test.reshape(-1, 1)).flatten()
-
-    # Calculate RMSE
-    rmse = np.sqrt(np.mean((y_test - predictions) ** 2))
-    print(f'RMSE: {rmse:.2f}')
-
-    # Plot the actual vs predicted traffic flow
-    plt.figure(figsize=(12, 6))
-    plt.plot(dates_test, y_test, label='Actual Flow')
-    plt.plot(dates_test, predictions, label='Predicted Flow')
-    plt.title('Actual vs Predicted Traffic Flow')
-    plt.xlabel('Date')
-    plt.ylabel('Traffic Flow (cars)')
-    plt.legend()
-    plt.tight_layout()
-    plt.show()
+def run_traffic_flow_prediction():   
+    # Parse CLI arguments
+    if len(sys.argv) < 3:
+        print("Usage: python traffic_model.py <excel_file> <model_type>")
+        print("Model types: lstm, xgb")
+        sys.exit(1)
+        
+    filename = sys.argv[1]
+    model_type = sys.argv[2].lower()
     
-def evaluate_xgboost_model(model, scaler, x_test, y_test, dates_test):
-    # XGBoost returns flat predictions
-    predictions = model.predict(x_test)
-
-    # Inverse scale
-    predictions = scaler.inverse_transform(predictions.reshape(-1, 1)).flatten()
-    y_test = scaler.inverse_transform(y_test.reshape(-1, 1)).flatten()
-
-    # Calculate RMSE
-    rmse = np.sqrt(np.mean((y_test - predictions) ** 2))
-    print(f'XGBoost RMSE: {rmse:.2f}')
-
-    # Plot results
-    plt.figure(figsize=(12, 6))
-    plt.plot(dates_test, y_test, label='Actual Flow')
-    plt.plot(dates_test, predictions, label='XGBoost Predicted Flow')
-    plt.title('XGBoost: Actual vs Predicted Traffic Flow')
-    plt.xlabel('Date')
-    plt.ylabel('Traffic Flow (cars)')
-    plt.legend()
-    plt.tight_layout()
-    plt.show()
-
-def run_traffic_flow_prediction():
-    data = process_data('Scats Data October 2006.xls')
-    scaler, (x_train, x_test, y_train, y_test, dates_train, dates_test) = split_data(processed_data=data, window_size=5, groupby='location', group_name='WARRIGAL_RD N of HIGH STREET_RD')
-
-    method = sys.argv[1]
-
-    if method == "lstm":
-        model, history = train_lstm_model(x_train, y_train)
-        evaluate_model(model, history, scaler, x_test, y_test, dates_test)
-    elif method == "xgb":
-        xgb_model = train_xgboost_model(x_train, y_train)
-        evaluate_xgboost_model(xgb_model, scaler, x_test, y_test, dates_test)
+    # Create model based on the selected type
+    if model_type == "lstm":
+        model = LSTMTrafficPredictionModel()
+    elif model_type == "xgb":
+        model = XGBoostTrafficPredictionModel()
     else:
-        raise ValueError(f"Unsupported method: {method}")    
+        print(f"Unsupported model type: {model_type}")
+        print("Supported types: lstm, xgb")
+        sys.exit(1)
+    
+    # Load data
+    data, x_train, x_test, y_train, y_test, dates_train, dates_test = model.load_data(filename)
+    
+    # Load scaler
+    model.load_scaler()
+    
+    # Train model
+    model.train(x_train, y_train)
+    
+    # Evaluate model
+    model.evaluate(x_test, y_test, dates_test)
+    
+    # Make a prediction for a specific date
+    target_dt = datetime(2006, 10, 31, 8, 0, 0)
+    model.predict(data, target_dt)
+
 
 run_traffic_flow_prediction()
-
-def predict_flow_for_date(model, data, scaler, location_name, target_datetime, window_size=5):
-    df = data[data['location'] == location_name].copy()
-    df['timestamp'] = pd.to_datetime(df['timestamp'])
-    df.set_index('timestamp', inplace=True)
-
-    if target_datetime not in df.index:
-        print("Target datetime not in dataset.")
-        return None
-
-    past_window = df.loc[:target_datetime].iloc[-(window_size + 1):-1]
     
-    if len(past_window) < window_size:
-        print("Not enough historical data to make prediction.")
-        return None
-
-    recent_flows = past_window['traffic_flow'].astype(float).values.reshape(-1, 1)
-    scaled_input = scaler.transform(recent_flows)
-    x_input = scaled_input.reshape((1, window_size, 1))
-    
-    prediction_scaled = model.predict(x_input, verbose=0)
-    prediction = round(scaler.inverse_transform(prediction_scaled)[0][0])
-
-    print(f"Predicted traffic flow at {target_datetime}: {prediction:.2f} cars")
-    return prediction
-
-
-data = process_data('Scats Data October 2006.xls')
-scaler, (x_train, x_test, y_train, y_test, dates_train, dates_test) = split_data(data, 5, 'location', 'WARRIGAL_RD N of HIGH STREET_RD')
-model, history = train_lstm_model(x_train, y_train)
-evaluate_model(model, history, scaler, x_test, y_test, dates_test)
-
-from datetime import datetime
-
-target_dt = datetime(2006, 10, 31, 8, 0, 0)
-
-predict_flow_for_date(
-    model=model,
-    data=data,
-    scaler=scaler,
-    location_name='WARRIGAL_RD N of HIGH STREET_RD',
-    target_datetime=target_dt,
-    window_size=5
-)
