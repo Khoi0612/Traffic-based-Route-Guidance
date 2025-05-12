@@ -5,6 +5,7 @@ from datetime import datetime
 from sklearn.model_selection import train_test_split
 import joblib
 import sys
+import math
 
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense, Dropout
@@ -112,7 +113,7 @@ class LSTMTrafficPredictionModel(BaseTrafficPredictionModel):
         
         return rmse, predictions
 
-    def predict(self, data, target_datetime):
+    def predict(self, data, target_datetime, distance_km=1.4):
         if self.model is None:
             raise ValueError("Model must be trained before prediction")
             
@@ -137,7 +138,13 @@ class LSTMTrafficPredictionModel(BaseTrafficPredictionModel):
         prediction = self.scaler.inverse_transform(prediction_scaled)[0][0]
         
         print(f"Predicted traffic flow at {target_datetime}: {prediction:.2f} cars")
-        return prediction
+        
+        flow_hourly = prediction * 4  # Convert 15-min to hourly flow
+        travel_time = estimate_travel_time(flow_hourly, distance_km)
+
+        print(f"Estimated travel time: {travel_time:.2f} seconds")
+    
+        return prediction, travel_time
 
 
 class XGBoostTrafficPredictionModel(BaseTrafficPredictionModel):
@@ -217,6 +224,22 @@ class XGBoostTrafficPredictionModel(BaseTrafficPredictionModel):
         print(f"Predicted traffic flow at {target_datetime}: {prediction:.2f} cars")
         return prediction
 
+def flow_to_speed(flow):
+    if flow <= 351:
+        return 60.0
+    a, b, c = -1.4648375, 93.75, -flow
+    d = b**2 - 4*a*c
+    if d < 0:
+        return 0.0
+    s1 = (-b + math.sqrt(d)) / (2 * a)
+    s2 = (-b - math.sqrt(d)) / (2 * a)
+    return min(s for s in (s1, s2) if s > 0)
+
+def estimate_travel_time(flow, distance_km, delay_sec=30):
+    speed = flow_to_speed(flow)
+    if speed <= 0:
+        return float('inf')
+    return (distance_km / speed) * 3600 + delay_sec
 
 def run_traffic_flow_prediction():   
     # Parse CLI arguments
