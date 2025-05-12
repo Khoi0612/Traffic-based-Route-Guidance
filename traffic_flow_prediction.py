@@ -8,7 +8,7 @@ import sys
 import math
 
 from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import LSTM, Dense, Dropout
+from tensorflow.keras.layers import LSTM, GRU, Dense, Dropout
 from xgboost import XGBRegressor
 
 class BaseTrafficPredictionModel:
@@ -146,6 +146,83 @@ class LSTMTrafficPredictionModel(BaseTrafficPredictionModel):
     
         return prediction, travel_time
 
+class GRUTrafficPredictionModel(BaseTrafficPredictionModel):
+
+    def __init__(self, window_size=5):
+        super().__init__(window_size)
+        self.model_name = "GRU"
+
+    def train(self, x_train, y_train):
+        x_train = x_train.reshape((x_train.shape[0], x_train.shape[1], 1))
+
+        self.model = Sequential()
+        self.model.add(GRU(units=128, return_sequences=True, input_shape=(x_train.shape[1], 1)))
+        self.model.add(Dropout(0.2))
+        self.model.add(GRU(units=128))
+        self.model.add(Dropout(0.2))
+        self.model.add(Dense(1))
+
+        self.model.compile(optimizer='adam', loss='mean_squared_error')
+
+        self.model.fit(
+            x_train, y_train,
+            epochs=100,
+            batch_size=32,
+            validation_split=0.1,
+            verbose=1
+        )
+        return self.model
+
+    def evaluate(self, x_test, y_test, dates_test):
+        if self.model is None:
+            raise ValueError("Model must be trained before evaluation")
+        if self.scaler is None:
+            raise ValueError("Scaler must be loaded before evaluation")
+
+        x_test = x_test.reshape((x_test.shape[0], x_test.shape[1], 1))
+        predictions = self.model.predict(x_test)
+
+        predictions = self.scaler.inverse_transform(predictions).flatten()
+        y_test = self.scaler.inverse_transform(y_test.reshape(-1, 1)).flatten()
+
+        rmse = np.sqrt(np.mean((y_test - predictions) ** 2))
+        print(f'{self.model_name} RMSE: {rmse:.2f}')
+
+        plt.figure(figsize=(12, 6))
+        plt.plot(dates_test, y_test, label='Actual Flow')
+        plt.plot(dates_test, predictions, label=f'{self.model_name} Predicted Flow')
+        plt.title(f'{self.model_name}: Actual vs Predicted Traffic Flow')
+        plt.xlabel('Date')
+        plt.ylabel('Traffic Flow (cars)')
+        plt.legend()
+        plt.tight_layout()
+        plt.show()
+
+        return rmse, predictions
+
+    def predict(self, data, target_datetime, distance_km=1.4):
+        if self.model is None:
+            raise ValueError("Model must be trained before prediction")
+        if self.scaler is None:
+            raise ValueError("Scaler must be loaded before prediction")
+
+        target_datetime = pd.to_datetime(target_datetime)
+        row = data[data['timestamp'] == target_datetime]
+        if row.empty:
+            print(f"Target datetime {target_datetime} not found in data.")
+            return None
+
+        x_input = row.iloc[0, 0:self.window_size].values.reshape((1, self.window_size, 1)).astype('float32')
+        prediction_scaled = self.model.predict(x_input, verbose=0)
+        prediction = self.scaler.inverse_transform(prediction_scaled)[0][0]
+
+        print(f"Predicted traffic flow at {target_datetime}: {prediction:.2f} cars")
+        
+        flow_hourly = prediction * 4  # Convert 15-min to hourly
+        travel_time = estimate_travel_time(flow_hourly, distance_km)
+        print(f"Estimated travel time: {travel_time:.2f} seconds")
+
+        return prediction, travel_time
 
 class XGBoostTrafficPredictionModel(BaseTrafficPredictionModel):
 
@@ -197,7 +274,7 @@ class XGBoostTrafficPredictionModel(BaseTrafficPredictionModel):
         
         return rmse, predictions
 
-    def predict(self, data, target_datetime):
+    def predict(self, data, target_datetime, distance_km=1.4):
         if self.model is None:
             raise ValueError("Model must be trained before prediction")
             
@@ -222,7 +299,12 @@ class XGBoostTrafficPredictionModel(BaseTrafficPredictionModel):
         prediction = self.scaler.inverse_transform(prediction_scaled.reshape(-1, 1))[0][0]
         
         print(f"Predicted traffic flow at {target_datetime}: {prediction:.2f} cars")
-        return prediction
+        
+        flow_hourly = prediction * 4  # Convert 15-min to hourly
+        travel_time = estimate_travel_time(flow_hourly, distance_km)
+        print(f"Estimated travel time: {travel_time:.2f} seconds")
+
+        return prediction, travel_time
 
 def flow_to_speed(flow):
     if flow <= 351:
@@ -245,7 +327,7 @@ def run_traffic_flow_prediction():
     # Parse CLI arguments
     if len(sys.argv) < 3:
         print("Usage: python traffic_model.py <excel_file> <model_type>")
-        print("Model types: lstm, xgb")
+        print("Model types: lstm, gru, xgb")
         sys.exit(1)
         
     filename = sys.argv[1]
@@ -254,6 +336,8 @@ def run_traffic_flow_prediction():
     # Create model based on the selected type
     if model_type == "lstm":
         model = LSTMTrafficPredictionModel()
+    elif model_type == "gru":
+        model = GRUTrafficPredictionModel()
     elif model_type == "xgb":
         model = XGBoostTrafficPredictionModel()
     else:
