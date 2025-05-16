@@ -7,6 +7,7 @@ from collections import defaultdict
 import pickle
 from datetime import datetime
 from ml_models import *
+import plotly.graph_objects as go
 
 def load_scats_data(filename, sheet_name='Data'):
     return pd.read_excel(filename, sheet_name=sheet_name, header=None)
@@ -40,10 +41,10 @@ def extract_node_coordinates(data):
                 continue
 
             if scats_id not in node_coordinates:
-                node_coordinates[scats_id] = {'sum_long': 0, 'sum_lat': 0, 'count': 0}
-
-            node_coordinates[scats_id]['sum_long'] += longitude
+                node_coordinates[scats_id] = {'sum_lat': 0, 'sum_long': 0, 'count': 0}
+            
             node_coordinates[scats_id]['sum_lat'] += latitude
+            node_coordinates[scats_id]['sum_long'] += longitude
             node_coordinates[scats_id]['count'] += 1
 
         except (IndexError, TypeError):
@@ -51,7 +52,7 @@ def extract_node_coordinates(data):
 
     # Compute average coordinates for each node
     nodes = {
-        site: (values['sum_long'] / values['count'], values['sum_lat'] / values['count'])
+        site: [values['sum_lat'] / values['count'], values['sum_long'] / values['count']]
         for site, values in node_coordinates.items()
     }
 
@@ -214,6 +215,79 @@ def export_to_file(content, base_name="test_"):
         # If file exists, try next index
         i += 1
 
+def draw_graph_on_map(nodes, edges, origin, destination):
+    # Create a figure
+    fig = go.Figure()
+
+    # Extract the scats number, lattitude, and longtitude from the nodes dictionary
+    scats_no = list(nodes.keys())
+    scats_lat = [nodes[name][0] for name in scats_no]
+    scats_lon = [nodes[name][1] for name in scats_no]
+
+    # Add markers for all scat sites
+    fig.add_trace(go.Scattermap(
+        lat=scats_lat,
+        lon=scats_lon,
+        mode='markers+text',
+        text=scats_no,
+        textposition='top right',
+        marker=dict(size=10, color='skyblue'),
+        name='Locations'
+    ))
+
+    # Draw edges connecting 2 nodes
+    for (n1, n2), cost in edges.items():
+        # Extract the lattitude, and longtitude from the nodes dictionary with each edge's key
+        lat_pair = [nodes[n1][0], nodes[n2][0]]
+        lon_pair = [nodes[n1][1], nodes[n2][1]]
+
+        # Add lines for each edge
+        fig.add_trace(go.Scattermap(
+            lat=lat_pair,
+            lon=lon_pair,
+            mode='lines+markers+text',
+            line=dict(width=2, color='black'),
+            marker=dict(size=6),
+            text=[None, cost],  # label at the end point
+            textposition='top right',
+            name=cost
+        ))
+
+    # Add origin
+    fig.add_trace(go.Scattermap(
+        lat=[nodes[origin][0]],
+        lon=[nodes[origin][1]],
+        mode='markers+text',
+        text=origin,
+        textposition='top right',
+        marker=dict(size=10, color='limegreen'),
+        name='Origin'
+    ))
+
+    # Add destination
+    fig.add_trace(go.Scattermap(
+        lat=[nodes[destination][0]],
+        lon=[nodes[destination][1]],
+        mode='markers+text',
+        text=destination[0],
+        textposition='top right',
+        marker=dict(size=10, color='orange'),
+        name='Destination'
+    ))
+
+    # Map layout
+    fig.update_layout(
+        mapbox=dict(
+            style='open-street-map',
+            center=dict(lat=sum(scats_lat)/len(scats_lat), lon=sum(scats_lon)/len(scats_lon)),
+            zoom=4
+        ),
+        margin={"r":0,"t":0,"l":0,"b":0}
+    )
+
+    # Show the map
+    fig.show()
+
 def run_generator():
     if len(sys.argv) < 4:
         print("Usage: python script.py <origin> <destination> <ml_model_type>")
@@ -241,6 +315,9 @@ def run_generator():
     # Export and print results
     print(graph_content)
     export_to_file(graph_content, base_name=f"test_{ml_model_type}_")
+
+    # Draw graph output
+    draw_graph_on_map(nodes, edges, origin, destination)
     
 
 run_generator()
