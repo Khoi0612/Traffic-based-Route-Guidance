@@ -48,7 +48,7 @@ def run_traffic_flow_prediction():
     model.evaluate(x_test, y_test, dates_test)
     
     # Make a prediction for a specific date
-    target_dt = datetime(2006, 10, 31, 8, 0, 0)
+    target_dt = datetime(2006, 11, 17, 8, 0, 0)
     model.predict(data, target_dt)
 
 

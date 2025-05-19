@@ -132,35 +132,52 @@ class LSTMTrafficPredictionModel(BaseTrafficPredictionModel):
     def predict(self, data, target_datetime, distance_km=1.4):
         if self.model is None:
             raise ValueError("Model must be trained before prediction")
-            
+        
         if self.scaler is None:
             raise ValueError("Scaler must be loaded before prediction")
-            
-        # Ensure target_datetime is datetime type
-        target_datetime = pd.to_datetime(target_datetime)
-        
-        # Find the row that matches the target timestamp
-        row = data[data['timestamp'] == target_datetime]
-        
-        if row.empty:
-            print(f"Target datetime {target_datetime} not found in data.")
-            return None
-            
-        # Extract input features and reshape for LSTM
-        x_input = row.iloc[0, 0:self.window_size].values.reshape((1, self.window_size, 1)).astype('float32')
-        
-        # Make prediction and inverse transform
-        prediction_scaled = self.model.predict(x_input, verbose=0)
-        prediction = self.scaler.inverse_transform(prediction_scaled)[0][0]
-        
-        print(f"Predicted traffic flow at {target_datetime}: {prediction:.2f} cars")
-        
-        flow_hourly = prediction * 4  # Convert 15-min to hourly flow
-        travel_time = self.estimate_travel_time(flow_hourly, distance_km)
 
+        target_datetime = pd.to_datetime(target_datetime)
+        last_known_time = data['timestamp'].max()
+
+        if target_datetime <= last_known_time:
+            # Use known row from dataset
+            row = data[data['timestamp'] == target_datetime]
+            
+            if row.empty:
+                print(f"No exact match for {target_datetime}")
+                return None
+        
+            x_input = row.iloc[0, 0:self.window_size].values.reshape((1, self.window_size, 1)).astype('float32')
+            prediction_scaled = self.model.predict(x_input, verbose=0)
+            prediction = self.scaler.inverse_transform(prediction_scaled)[0][0]
+            print(f"Predicted traffic flow for {target_datetime}: {prediction:.2f} cars")
+        else:
+            print(f"{target_datetime} is in the future. Starting recursive prediction from {last_known_time}...")
+
+            last_row = data[data['timestamp'] == last_known_time]
+            if last_row.empty:
+                print(f"No data for last known time {last_known_time}")
+                return None
+
+            x_input = last_row.iloc[0, 0:self.window_size].values.reshape((1, self.window_size, 1)).astype('float32')
+            step = pd.Timedelta(minutes=15)
+            steps_needed = int((target_datetime - last_known_time) / step)
+
+            for _ in range(steps_needed):
+                prediction_scaled = self.model.predict(x_input, verbose=0)
+                new_val = prediction_scaled[0][0]
+                x_input = np.append(x_input[:, 1:, :], [[[new_val]]], axis=1)
+
+            prediction = self.scaler.inverse_transform([[new_val]])[0][0]
+            print(f"Predicted traffic flow for {target_datetime} (forecasted): {prediction:.2f} cars")
+
+        flow_hourly = prediction * 4
+        travel_time = self.estimate_travel_time(flow_hourly, distance_km)
+        
         print(f"Estimated travel time: {travel_time:.2f} seconds")
-    
+
         return prediction, travel_time
+
 
 class GRUTrafficPredictionModel(BaseTrafficPredictionModel):
 
@@ -219,26 +236,52 @@ class GRUTrafficPredictionModel(BaseTrafficPredictionModel):
     def predict(self, data, target_datetime, distance_km=1.4):
         if self.model is None:
             raise ValueError("Model must be trained before prediction")
+        
         if self.scaler is None:
             raise ValueError("Scaler must be loaded before prediction")
 
         target_datetime = pd.to_datetime(target_datetime)
-        row = data[data['timestamp'] == target_datetime]
-        if row.empty:
-            print(f"Target datetime {target_datetime} not found in data.")
-            return None
+        last_known_time = data['timestamp'].max()
 
-        x_input = row.iloc[0, 0:self.window_size].values.reshape((1, self.window_size, 1)).astype('float32')
-        prediction_scaled = self.model.predict(x_input, verbose=0)
-        prediction = self.scaler.inverse_transform(prediction_scaled)[0][0]
+        if target_datetime <= last_known_time:
+            # Use known row from dataset
+            row = data[data['timestamp'] == target_datetime]
+            
+            if row.empty:
+                print(f"No exact match for {target_datetime}")
+                return None
+            
+            x_input = row.iloc[0, 0:self.window_size].values.reshape((1, self.window_size, 1)).astype('float32')
+            prediction_scaled = self.model.predict(x_input, verbose=0)
+            prediction = self.scaler.inverse_transform(prediction_scaled)[0][0]
+            print(f"Predicted traffic flow for {target_datetime}: {prediction:.2f} cars")
+        else:
+            print(f"{target_datetime} is in the future. Starting recursive prediction from {last_known_time}...")
 
-        print(f"Predicted traffic flow at {target_datetime}: {prediction:.2f} cars")
-        
-        flow_hourly = prediction * 4  # Convert 15-min to hourly
+            last_row = data[data['timestamp'] == last_known_time]
+            if last_row.empty:
+                print(f"No data for last known time {last_known_time}")
+                return None
+
+            x_input = last_row.iloc[0, 0:self.window_size].values.reshape((1, self.window_size, 1)).astype('float32')
+            step = pd.Timedelta(minutes=15)
+            steps_needed = int((target_datetime - last_known_time) / step)
+
+            for _ in range(steps_needed):
+                prediction_scaled = self.model.predict(x_input, verbose=0)
+                new_val = prediction_scaled[0][0]
+                x_input = np.append(x_input[:, 1:, :], [[[new_val]]], axis=1)
+
+            prediction = self.scaler.inverse_transform([[new_val]])[0][0]
+            print(f"Predicted traffic flow for {target_datetime} (forecasted): {prediction:.2f} cars")
+
+        flow_hourly = prediction * 4
         travel_time = self.estimate_travel_time(flow_hourly, distance_km)
+        
         print(f"Estimated travel time: {travel_time:.2f} seconds")
 
         return prediction, travel_time
+
 
 class XGBoostTrafficPredictionModel(BaseTrafficPredictionModel):
 
@@ -293,30 +336,44 @@ class XGBoostTrafficPredictionModel(BaseTrafficPredictionModel):
     def predict(self, data, target_datetime, distance_km=1.4):
         if self.model is None:
             raise ValueError("Model must be trained before prediction")
-            
+        
         if self.scaler is None:
             raise ValueError("Scaler must be loaded before prediction")
-            
-        # Ensure target_datetime is datetime type
+
         target_datetime = pd.to_datetime(target_datetime)
-        
-        # Find the row that matches the target timestamp
-        row = data[data['timestamp'] == target_datetime]
-        
-        if row.empty:
-            print(f"Target datetime {target_datetime} not found in data.")
-            return None
+        last_known_time = data['timestamp'].max()
+
+        if target_datetime <= last_known_time:
+            row = data[data['timestamp'] == target_datetime]
             
-        # Extract input features
-        x_input = row.iloc[0, 0:self.window_size].values.reshape(1, -1).astype('float32')
-        
-        # Make prediction and inverse transform
-        prediction_scaled = self.model.predict(x_input)
-        prediction = self.scaler.inverse_transform(prediction_scaled.reshape(-1, 1))[0][0]
-        
-        print(f"Predicted traffic flow at {target_datetime}: {prediction:.2f} cars")
-        
-        flow_hourly = prediction * 4  # Convert 15-min to hourly
+            if row.empty:
+                print(f"No exact match for {target_datetime}")
+                return None
+            x_input = row.iloc[0, 0:self.window_size].values.reshape(1, -1).astype('float32')
+            prediction_scaled = self.model.predict(x_input)
+            prediction = self.scaler.inverse_transform([[prediction_scaled[0]]])[0][0]
+            print(f"Predicted traffic flow for {target_datetime}: {prediction:.2f} cars")
+        else:
+            print(f"{target_datetime} is in the future. Starting recursive prediction from {last_known_time}...")
+
+            last_row = data[data['timestamp'] == last_known_time]
+            if last_row.empty:
+                print(f"No data for last known time {last_known_time}")
+                return None
+
+            x_input = last_row.iloc[0, 0:self.window_size].values.reshape(1, -1).astype('float32')
+            step = pd.Timedelta(minutes=15)
+            steps_needed = int((target_datetime - last_known_time) / step)
+
+            for _ in range(steps_needed):
+                prediction_scaled = self.model.predict(x_input)
+                new_val = prediction_scaled[0]
+                x_input = np.append(x_input[:, 1:], [[new_val]], axis=1)
+
+            prediction = self.scaler.inverse_transform([[new_val]])[0][0]
+            print(f"Predicted traffic flow for {target_datetime} (forecasted): {prediction:.2f} cars")
+
+        flow_hourly = prediction * 4
         travel_time = self.estimate_travel_time(flow_hourly, distance_km)
         print(f"Estimated travel time: {travel_time:.2f} seconds")
 
