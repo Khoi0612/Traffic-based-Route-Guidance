@@ -71,7 +71,7 @@ class TrafficPredictionGUI:
         # Make the input column expandable
         main_frame.columnconfigure(1, weight=1)
         
-    def predict_traffic(self):
+    def find_routes(self):
         ml_model = self.ml_model_var.get()
         route_model = self.route_model_var.get()
         date = self.date_var.get()
