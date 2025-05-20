@@ -5,7 +5,7 @@ from datetime import datetime
 import pandas as pd
 from path_finding_algorithms import run_algorithm, load_graph_from_file, GraphProblem
 from collections import defaultdict
-from scats_based_path_generator import extract_street_connections
+from scats_based_path_generator import *
 
 class TrafficPredictionGUI:
     @staticmethod
@@ -21,7 +21,7 @@ class TrafficPredictionGUI:
                     # Use the first connection to create a readable label
                     main_street = info_list[0]['connecting_street']
                     reference_street = info_list[0]['location'].split("of")[-1].strip()
-                    labels[int(scats_id)] = f"{main_street} / {reference_street}"
+                    labels[scats_id] = f"{main_street} / {reference_street}"
         except Exception as e:
             print(f"Failed to extract labels: {e}")
         return labels
@@ -43,7 +43,7 @@ class TrafficPredictionGUI:
         ttk.Label(main_frame, text="Select ML Model:").grid(row=1, column=0, sticky="w", pady=5)
         self.ml_model_var = tk.StringVar()
         ml_model_combo = ttk.Combobox(main_frame, textvariable=self.ml_model_var, 
-                                      values=["LSTM", "GRU", "XGBoost"])
+                                      values=["LSTM", "GRU", "XGB"])
         ml_model_combo.grid(row=1, column=1, sticky="ew", pady=5)
         ml_model_combo.current(0)
         
@@ -112,22 +112,39 @@ class TrafficPredictionGUI:
         route_model = translation.get(route_model, route_model).upper()
         date = self.date_var.get()
         time_val = self.time_var.get()
+        date_time_str = f"{date} {time_val}"
         origin_text = self.origin_var.get()
         destination_text = self.destination_var.get()
-        
-        # # Normalize route model
-        # if route_model == "A*":
-        #     route_model = "AS"
 
         try:
-            origin_id = int(origin_text.split(" ")[0])
-            destination_id = int(destination_text.split(" ")[0])
+            origin_id = origin_text.split(" ")[0]
+            destination_id = destination_text.split(" ")[0]
         except ValueError:
             messagebox.showerror("Invalid SCATS selection", "Failed to parse SCATS site numbers.")
             return
 
         # Step 2: Build graph file name based on ML model
-        graph_file = f"test_{ml_model}_1.txt"
+        date_time = datetime.strptime(date_time_str, "%Y-%m-%d %H:%M")
+        target_dt_str = date_time.strftime("%Y-%m-%d_%H-%M-%S")
+        graph_file = None
+        test_directory = 'tests'  # Adjust path as needed
+
+        # Look for matching files in the directory
+        if os.path.exists(test_directory):
+            for filename in os.listdir(test_directory):
+                if filename.endswith('.txt'):
+                    # Match the new filename format with origin, destination, and ml model
+                    pattern = fr"test_from_{origin_id}_to_{destination_id}_using_{ml_model}_at_{target_dt_str}.txt"
+                    if re.match(pattern, filename):
+                        graph_file = os.path.join(test_directory, filename)
+                        print(f"Using existing graph file: {graph_file}")
+                        break
+
+        # If no matching file found, generate a new one
+        if graph_file is None:
+            graph_file = run_generator(origin_id, destination_id, ml_model, date_time)
+            print(f"Generated new graph file: {graph_file}")
+
         try:
             graph_map, origin_from_file, destinations_from_file = load_graph_from_file(graph_file)
         except Exception as e:
@@ -150,6 +167,7 @@ class TrafficPredictionGUI:
             path_str = " → ".join(path)
             goal = result_node.state
             cost = result_node.path_cost
+            draw_solution_on_map(graph_map, origin_id, destination_id, path)
         else:
             path_str = "No path found."
             goal = "-"
@@ -172,7 +190,6 @@ class TrafficPredictionGUI:
             f"Path:\n{path_str}"
         )
         
-
 if __name__ == "__main__":
     root = tk.Tk()
     app = TrafficPredictionGUI(root)

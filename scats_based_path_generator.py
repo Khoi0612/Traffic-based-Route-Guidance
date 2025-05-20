@@ -36,8 +36,14 @@ def extract_node_coordinates(data):
             latitude = data.iloc[row, 3]
             longitude = data.iloc[row, 4]
 
-            # Skip if any value is missing
-            if pd.isna(scats_id) or pd.isna(latitude) or pd.isna(longitude):
+            # Skip if any value is missing or 0
+            if (
+                pd.isna(scats_id) or 
+                pd.isna(latitude) or 
+                pd.isna(longitude) or 
+                latitude == 0 or 
+                longitude == 0
+            ):
                 continue
 
             if scats_id not in node_coordinates:
@@ -171,6 +177,8 @@ def generate_edges(nodes, connections, models_dir, ml_method, target_datetime=No
                 coord2 = nodes.get(destination_node)
                 
                 if coord1 and coord2:
+                    print(f"Generating edge between {node} and {destination_node}")
+
                     # Calculate physical distance in km
                     distance = calculate_haversine_distance(coord1, coord2)
 
@@ -200,20 +208,13 @@ def format_graph_data(nodes, edges, origin, destination):
     # Combine all sections
     return nodes_str + edges_str + origin_str + destination_str
 
-def export_to_file(content, base_name="test_"):
-    i = 1  # Starting index
-    while True:
-        filename = f"{base_name}{i}.txt"
-
-        # If file doesn't exist, create it and exit loop
-        if not os.path.exists(filename):
-            with open(filename, "w") as file:
-                file.write(content)
-            print(f"Exported to {filename}")
-            return filename
-        
-        # If file exists, try next index
-        i += 1
+def export_to_file(content, base_name, dir='tests'):
+    filename_str = f"{base_name}.txt"
+    filename = os.path.join(dir, filename_str)
+    with open(filename, "w") as file:
+        file.write(content)
+    print(f"Exported to {filename}")
+    return filename
 
 def draw_graph_on_map(nodes, edges, origin, destination):
     # Create a figure
@@ -245,12 +246,10 @@ def draw_graph_on_map(nodes, edges, origin, destination):
         fig.add_trace(go.Scattermap(
             lat=lat_pair,
             lon=lon_pair,
-            mode='lines+markers+text',
+            mode='lines+markers',
             line=dict(width=2, color='black'),
             marker=dict(size=6),
-            text=[None, cost],  # label at the end point
-            textposition='top right',
-            name=cost
+            name=f"{cost:.0f} secs"
         ))
 
     # Add origin
@@ -275,28 +274,89 @@ def draw_graph_on_map(nodes, edges, origin, destination):
         name='Destination'
     ))
 
-    # Map layout
+    center_lat = sum(scats_lat)/len(scats_lat)
+    center_lon = sum(scats_lon)/len(scats_lon)
+    zoom_level = 11.5
+
+    legend_item_count = len([trace for trace in fig.data if trace.showlegend])
+    legend_height_adjustment = 0.5 * legend_item_count / zoom_level  # Adjust based on zoom level
+    
+    adjusted_center_lat = center_lat - legend_height_adjustment/2
+
     fig.update_layout(
-        mapbox=dict(
-            style='open-street-map',
-            center=dict(lat=sum(scats_lat)/len(scats_lat), lon=sum(scats_lon)/len(scats_lon)),
-            zoom=4
+        autosize=True,
+        hovermode='closest',
+        showlegend=True,
+        map=dict(
+            bearing=0,
+            center=dict(lat=adjusted_center_lat, lon=center_lon),
+            zoom=zoom_level,
+            style='open-street-map'
         ),
-        margin={"r":0,"t":0,"l":0,"b":0}
-    )
+        margin={"r":0,"t":0,"l":0,"b":0},
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=0.02,
+            xanchor="center",
+            x=0.5
+        )
+    )   
+
+    return fig, adjusted_center_lat, center_lon, zoom_level
+
+def draw_solution_on_map(graph_map, origin, destination, solution_path):
+    nodes = graph_map.locations
+    edges = {}
+    for node1 in graph_map.graph_dict:
+        for node2, cost in graph_map.graph_dict[node1].items():
+            edges[(node1, node2)] = cost
+
+    fig, adjusted_center_lat, center_lon, zoom_level = draw_graph_on_map(nodes, edges, origin, destination)
+
+    # Draw solution path edges in red
+    for i in range(len(solution_path) - 1):
+        n1 = solution_path[i]
+        n2 = solution_path[i + 1]
+        
+        # Get coordinates
+        lat1, lon1 = nodes[n1]
+        lat2, lon2 = nodes[n2]
+        
+        # Draw the solution edge line in red with increased width
+        fig.add_trace(go.Scattermap(
+            lat=[lat1, lat2],
+            lon=[lon1, lon2],
+            mode='lines',
+            line=dict(width=5, color='red'),
+            showlegend=False if i > 0 else True,
+            name='Solution Path' if i == 0 else None
+        ))
+
+    fig.update_layout(
+        autosize=True,
+        hovermode='closest',
+        showlegend=True,
+        map=dict(
+            bearing=0,
+            center=dict(lat=adjusted_center_lat, lon=center_lon),
+            zoom=zoom_level,
+            style='open-street-map'
+        ),
+        margin={"r":0,"t":0,"l":0,"b":0},
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=0.02,
+            xanchor="center",
+            x=0.5
+        )
+    ) 
 
     # Show the map
     fig.show()
 
-def run_generator():
-    if len(sys.argv) < 4:
-        print("Usage: python script.py <origin> <destination> <ml_model_type>")
-        return
-        
-    origin = sys.argv[1]
-    destination = sys.argv[2]
-    ml_model_type = sys.argv[3]
-    
+def run_generator(origin, destination, ml_model_type, target_dt):  
     # Path to data file
     data_file = os.path.join('data', 'raw_data' , 'Scats Data October 2006.xls')
     
@@ -306,7 +366,7 @@ def run_generator():
     # Process data
     nodes = extract_node_coordinates(scats_data)
     connections = extract_street_connections(scats_data)
-    target_dt = datetime(2006, 10, 31, 8, 0, 0)
+    
     edges = generate_edges(nodes, connections, 'trained_models', ml_model_type.lower(), target_dt)
     
     # Generate graph output
@@ -314,10 +374,11 @@ def run_generator():
     
     # Export and print results
     print(graph_content)
-    export_to_file(graph_content, base_name=f"test_{ml_model_type}_")
+    target_dt_str = target_dt.strftime("%Y-%m-%d_%H-%M-%S")
+    filename = export_to_file(graph_content, base_name=f"test_from_{origin}_to_{destination}_using_{ml_model_type}_at_{target_dt_str}")
 
     # Draw graph output
     draw_graph_on_map(nodes, edges, origin, destination)
-    
 
-run_generator()
+    return filename
+    

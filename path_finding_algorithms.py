@@ -426,18 +426,18 @@ def load_graph_from_file(filename):
         if section == "nodes":
             # e.g. 0970: (-37.867303089430855,145.09151138211365)
             parts = line.split(":")
-            node = int(parts[0].lstrip("0"))  # remove leading zeros like '0970' → 970
+            node = parts[0]  # remove leading zeros like '0970' → 970
             coords = list(map(float, parts[1].strip(" ()").split(',')))  # support float
             nodes[node] = coords
         elif section == "edges":
             parts = line.split(":")
-            n1, n2 = map(lambda x: int(x.lstrip("0")), parts[0].strip(" ()").split(','))
+            n1, n2 = map(lambda x: x, parts[0].strip(" ()").split(','))
             cost = float(parts[1])          
             edges.setdefault((n1, n2), cost)
         elif section == "origin":
-            origin = int(line)
+            origin = line
         elif section == "destinations":
-            destinations = list(map(int, line.split(';')))
+            destinations = map(int, line.split(';'))
 
     # Create the graph from these sections
     for node in nodes:
@@ -512,58 +512,4 @@ def run_algorithm(method, problem):
         raise ValueError(f"Unsupported method: {method}")
 
     return result_node, explored, runtime_ms
-
-def runGraphSeacrh():
-    # Load file(s) and method from CLI
-    method = sys.argv[2]
-    filenames = glob.glob("*.txt") if sys.argv[1] == "-a" else [sys.argv[1]]
-    
-    # Init GUI
-    root = tk.Tk()
-    app = GraphGUI(root)
-
-    for file in filenames:
-        graph_map, origin, dest = load_graph_from_file(file)
-        problem = GraphProblem(origin, dest, graph_map)
-
-        results = {}
-        path = []
-        final_node = ""
-        algorithms_to_run = (
-            ["DFS", "BFS", "GBFS", "AS", "CUS1", "CUS2"] if method == "-a" else [method]
-        )
-
-        for i, algo in enumerate(algorithms_to_run):
-            path_cost = None
-            result_node, explored, runtime = run_algorithm(algo, problem)
-
-            results[i] = {
-                "result": result_node,
-                "no_nodes_explored": explored,
-                "runtime": runtime,
-                "algorithm": algo
-            }
-
-            if result_node is None:
-                path = None
-                final_node = "No solution"
-            elif result_node is not None and result_node.state != origin:
-                path = [p.state for p in result_node.path()]
-                final_node = result_node.solution()[-1]
-                path_cost = result_node.path_cost
-            elif result_node.state == origin:
-                path = None
-                final_node = origin
-            
-            print(f"{file} {algo}\n{final_node} {explored} {path_cost}\n{runtime:.2f}ms\n{path}")
-
-            title = f"Solutions for {file.removesuffix('.txt')} based on {algo}"
-            metrics = {"nodes_explored": explored, "runtime": runtime, "algorithm": algo}
-            app.draw_solution(graph_map, origin, dest, path, title, metrics)
-
-    # Graceful exit
-    root.protocol("WM_DELETE_WINDOW", app.on_closing)
-    root.mainloop()
-
-# runGraphSeacrh()
 
