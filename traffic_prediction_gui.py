@@ -4,25 +4,26 @@ from datetime import datetime
 # from scats_based_path_generator import extract_scats_labels
 import pandas as pd
 from path_finding_algorithms import run_algorithm, load_graph_from_file, GraphProblem
+from collections import defaultdict
+from scats_based_path_generator import extract_street_connections
 
 class TrafficPredictionGUI:
     @staticmethod
-    def extract_scats_labels(excel_path, sheet_name='Data'):
+    def extract_intersection_labels(excel_path, sheet_name='Data'):
+        """Returns a dict like {2000: 'WARRIGAL_RD / TOORAK_RD'}"""
         labels = {}
         try:
             data = pd.read_excel(excel_path, sheet_name=sheet_name, header=None)
-            for row in range(2, len(data)):
-                try:
-                    scats_id = data.iloc[row, 0]
-                    location_text = str(data.iloc[row, 1])
-                    if pd.notna(scats_id) and pd.notna(location_text):
-                        if int(scats_id) not in labels:
-                            labels[int(scats_id)] = location_text.strip()
-                except:
-                    continue
+            connections = extract_street_connections(data)
+
+            for scats_id, info_list in connections.items():
+                if info_list:
+                    # Use the first connection to create a readable label
+                    main_street = info_list[0]['connecting_street']
+                    reference_street = info_list[0]['location'].split("of")[-1].strip()
+                    labels[int(scats_id)] = f"{main_street} / {reference_street}"
         except Exception as e:
-            print(f"Failed to load SCATS label data: {e}")
-        
+            print(f"Failed to extract labels: {e}")
         return labels
     
     def __init__(self, root):
@@ -65,27 +66,11 @@ class TrafficPredictionGUI:
         self.time_var = tk.StringVar(value=datetime.now().strftime("%H:%M"))
         time_entry = ttk.Entry(main_frame, textvariable=self.time_var)
         time_entry.grid(row=4, column=1, sticky="ew", pady=5)
-        
-        # # Origin selection
-        # ttk.Label(main_frame, text="Origin:").grid(row=5, column=0, sticky="w", pady=5)
-        # self.origin_var = tk.StringVar()
-        # origin_combo = ttk.Combobox(main_frame, textvariable=self.origin_var, 
-        #                            values=["Downtown", "Airport", "University", "Shopping Mall", "Business District"])
-        # origin_combo.grid(row=5, column=1, sticky="ew", pady=5)
-        # origin_combo.current(0)
-        
-        # # Destination selection
-        # ttk.Label(main_frame, text="Destination:").grid(row=6, column=0, sticky="w", pady=5)
-        # self.destination_var = tk.StringVar()
-        # destination_combo = ttk.Combobox(main_frame, textvariable=self.destination_var, 
-        #                                 values=["Downtown", "Airport", "University", "Shopping Mall", "Business District"])
-        # destination_combo.grid(row=6, column=1, sticky="ew", pady=5)
-        # destination_combo.current(1)
 
         # Load SCATS labels from Excel
-        labels = TrafficPredictionGUI.extract_scats_labels("data/raw_data/Scats Data October 2006.xls")
-        combo_items = [f"{sid} - {name}" for sid, name in sorted(labels.items())]
-
+        labels = TrafficPredictionGUI.extract_intersection_labels("data/raw_data/Scats Data October 2006.xls")
+        combo_items = [f"{sid} [intersection {name}]" for sid, name in sorted(labels.items())]
+        
         # Origin dropdown
         ttk.Label(main_frame, text="Origin:").grid(row=5, column=0, sticky="w", pady=5)
         self.origin_var = tk.StringVar()
@@ -135,8 +120,8 @@ class TrafficPredictionGUI:
         #     route_model = "AS"
 
         try:
-            origin_id = int(origin_text.split(" - ")[0])
-            destination_id = int(destination_text.split(" - ")[0])
+            origin_id = int(origin_text.split(" ")[0])
+            destination_id = int(destination_text.split(" ")[0])
         except ValueError:
             messagebox.showerror("Invalid SCATS selection", "Failed to parse SCATS site numbers.")
             return
@@ -186,38 +171,6 @@ class TrafficPredictionGUI:
             f"  Runtime: {runtime:.2f} ms\n\n"
             f"Path:\n{path_str}"
         )
-
-        
-    # def find_routes(self):
-    #     ml_model = self.ml_model_var.get()
-    #     route_model = self.route_model_var.get()
-    #     date = self.date_var.get()
-    #     time = self.time_var.get()
-    #     origin_text = self.origin_var.get()
-    #     destination_text = self.destination_var.get()
-        
-    #     # Extract SCATS site numbers (as integers)
-    #     origin_id = int(origin_text.split(" - ")[0])
-    #     destination_id = int(destination_text.split(" - ")[0])
-        
-    #     # Sample route finding logic
-    #     routes = [
-    #         f"1. Via Main Street (15 mins, 5.2 miles)",
-    #         f"2. Via Highway 101 (12 mins, 7.8 miles)",
-    #         f"3. Via Side Streets (18 mins, 4.3 miles)"
-    #     ]
-        
-    #     # Display the results
-    #     self.results_text.delete(1.0, tk.END)
-    #     self.results_text.insert(tk.END, 
-    #         f"ML Model: {ml_model}\n"
-    #         f"Route Model: {route_model}\n"
-    #         f"Date: {date}\n"
-    #         f"Time: {time}\n"
-    #         f"From: {origin_text}\n"
-    #         f"To: {destination_text}\n\n"
-    #         "Recommended Routes:\n" + "\n".join(routes)
-    #     )
         
 
 if __name__ == "__main__":
