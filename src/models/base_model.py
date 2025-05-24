@@ -93,8 +93,16 @@ class BaseTrafficPredictionModel:
         
         if self.scaler is None:
             raise ValueError("Scaler must be loaded before prediction")
-
+        
+        # Normalize the target datetime: round to nearest 15-min, remove timezone
         target_datetime = pd.to_datetime(target_datetime)
+        target_datetime = target_datetime.replace(minute=(target_datetime.minute // 15) * 15, second=0, microsecond=0)
+        target_datetime = target_datetime.tz_localize(None) if target_datetime.tzinfo else target_datetime
+        
+        # Normalize data timestamps
+        data['timestamp'] = pd.to_datetime(data['timestamp']).dt.floor('15min')
+        data['timestamp'] = data['timestamp'].dt.tz_localize(None)
+
         last_known_time = data['timestamp'].max()
 
         if target_datetime <= last_known_time:

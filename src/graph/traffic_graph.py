@@ -39,12 +39,12 @@ class TrafficGraph:
                 location = neighbor['location']
 
                 # Create file path for model
-                model_path = os.path.join('..', 'data', models_dir, f"{location}_{ml_method}.pkl")
+                model_path = os.path.join('data', models_dir, f"{location}_{ml_method}.pkl")
 
                 with open(model_path, 'rb') as f:
                     trained_model = pickle.load(f)
 
-                filename = os.path.join('..', 'data', 'processed', f"{location}.xlsx")
+                filename = os.path.join('data', 'processed', f"{location}.xlsx")
                 # Load data
                 data, x_train, x_test, y_train, y_test, dates_train, dates_test = trained_model.load_data(filename)
 
@@ -62,7 +62,12 @@ class TrafficGraph:
                         distance = self.calculate_haversine_distance(coord1, coord2)
 
                         # Make a prediction for a specific date
-                        pred_value, travel_time = trained_model.predict(data, target_datetime, distance)
+                        result = trained_model.predict(data, target_datetime, distance)
+                        if not result or result == (None, None):
+                            print(f"Prediction failed for edge {node} → {destination_node}, skipping.")
+                            continue
+
+                        pred_value, travel_time = result
                         
                         # Store prediction as the edge weight
                         self.edges[edge] = travel_time
@@ -89,7 +94,7 @@ class TrafficGraph:
     
     def export_to_file(self, content, base_name):
         filename_str = f"{base_name}.txt"
-        filename = os.path.join('..', 'output', filename_str)
+        filename = os.path.join('output', filename_str)
         with open(filename, "w") as file:
             file.write(content)
         print(f"Exported to {filename}")

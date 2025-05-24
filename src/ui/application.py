@@ -71,7 +71,7 @@ class TrafficPredictionGUI:
         time_entry.grid(row=4, column=1, sticky="ew", pady=5)
 
         # Load SCATS labels from Excel
-        excel_path = os.path.join('..', 'data', 'raw', 'Scats Data October 2006.xls')
+        excel_path = os.path.join('data', 'raw', 'Scats Data October 2006.xls')
         labels = TrafficPredictionGUI.extract_intersection_labels(excel_path)
         combo_items = [f"{sid} [intersection {name}]" for sid, name in sorted(labels.items())]
         
@@ -134,7 +134,7 @@ class TrafficPredictionGUI:
         date_time = datetime.strptime(date_time_str, "%Y-%m-%d %H:%M")
         target_dt_str = date_time.strftime("%Y-%m-%d_%H-%M-%S")
         graph_file = None
-        output_directory = os.path.join('..', 'output')
+        output_directory = os.path.join('output')
 
         # Look for matching files in the directory
         if os.path.exists(output_directory):
