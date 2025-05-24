@@ -12,10 +12,10 @@ import joblib
 class DataProcessor:
     
     def __init__(self, raw_data_path=None, sheet_name='Data', output_dir=None):
-        self.raw_data_path = raw_data_path or os.path.join('..', 'data', 'raw', 'Scats Data October 2006.xls')
+        self.raw_data_path = raw_data_path or os.path.join('data', 'raw', 'Scats Data October 2006.xls')
         self.sheet_name = sheet_name
-        self.processed_dir = output_dir or os.path.join('..', 'data', 'processed')
-        self.models_dir = os.path.join('..', 'data', 'models')
+        self.processed_dir = output_dir or os.path.join('data', 'processed')
+        self.models_dir = os.path.join('data', 'models')
         self.data = self._load_data()
         
         # Create directories if they don't exist
@@ -104,8 +104,10 @@ class DataProcessor:
             print(f"Exported group {group_name} to {filename}")
             
             # Save the scaler
-            scaler_path = os.path.join(self.models_dir, f"scaler.save")
+            scaler_path = os.path.join(self.models_dir, f"{location_safe_name}_scaler.save")
             joblib.dump(scaler, scaler_path)
+            print(f"Exported scaler for {group_name} to {scaler_path}")
+
 
     def run_process_data(self, window_size=5):
         print(f"Processing data from {self.raw_data_path}...")

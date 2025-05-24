@@ -48,6 +48,9 @@ class TrafficGraph:
                 # Load data
                 data, x_train, x_test, y_train, y_test, dates_train, dates_test = trained_model.load_data(filename)
 
+                # Load scaler
+                trained_model.load_scaler(scaler_base_name=f"{location}_scaler.save")
+
                 # Create sorted edge tuple to avoid duplicates
                 edge = tuple(sorted((node, destination_node)))
                 

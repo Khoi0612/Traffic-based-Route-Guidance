@@ -28,8 +28,8 @@ class BaseTrafficPredictionModel:
         
         return data, x_train, x_test, y_train, y_test, dates_train, dates_test
 
-    def load_scaler(self, scaler_base_name='scaler.save'):
-        scaler_path = os.path.join('..', 'data', 'models',  scaler_base_name)
+    def load_scaler(self, scaler_base_name):
+        scaler_path = os.path.join('data', 'models',  scaler_base_name)
         self.scaler = joblib.load(scaler_path)
         return self.scaler
     

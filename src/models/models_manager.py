@@ -6,8 +6,8 @@ from src.models import LSTMTrafficPredictionModel, GRUTrafficPredictionModel, XG
 
 class ModelManager:
     def __init__(self, train_data_dir=None, models_dir=None):
-        self.train_data_dir = train_data_dir or os.path.join('..', 'data', 'processed')
-        self.models_dir = models_dir or os.path.join('..', 'data', 'models')
+        self.train_data_dir = train_data_dir or os.path.join('data', 'processed')
+        self.models_dir = models_dir or os.path.join('data', 'models')
         self.models_dict = {
             "lstm": LSTMTrafficPredictionModel,
             "gru": GRUTrafficPredictionModel,
@@ -32,7 +32,6 @@ class ModelManager:
 
                     # Load data and scaler
                     data, x_train, x_test, y_train, y_test, dates_train, dates_test = model.load_data(full_path)
-                    model.load_scaler()
 
                     # Train model
                     model.train(x_train, y_train)  # train in-place

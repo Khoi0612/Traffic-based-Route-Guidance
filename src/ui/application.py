@@ -132,6 +132,7 @@ class TrafficPredictionGUI:
 
         # Step 2: Build graph file name based on ML model
         date_time = datetime.strptime(date_time_str, "%Y-%m-%d %H:%M")
+        print(f"\n{date_time}\n")
         target_dt_str = date_time.strftime("%Y-%m-%d_%H-%M-%S")
         graph_file = None
         output_directory = os.path.join('output')
