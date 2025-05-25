@@ -53,14 +53,14 @@ class BaseTrafficPredictionModel:
     def train(self, x_train, y_train):
         raise NotImplementedError("Subclasses must implement the train method")
 
-    def evaluate(self, x_test, y_test, dates_test):
+    def evaluate(self, x_test, y_test, dates_test, create_plot=True):
         if self.model is None:
             raise ValueError("Model must be trained before evaluation")
             
         if self.scaler is None:
             raise ValueError("Scaler must be loaded before evaluation")
             
-        # Reshape test data for LSTM
+        # Reshape test data
         x_test = x_test.reshape((x_test.shape[0], x_test.shape[1], 1))
         
         # Make predictions
@@ -74,18 +74,19 @@ class BaseTrafficPredictionModel:
         rmse = np.sqrt(np.mean((y_test - predictions) ** 2))
         print(f'{self.model_name} RMSE: {rmse:.2f}')
         
-        # Plot results
-        plt.figure(figsize=(12, 6))
-        plt.plot(dates_test, y_test, label='Actual Flow')
-        plt.plot(dates_test, predictions, label=f'{self.model_name} Predicted Flow')
-        plt.title(f'{self.model_name}: Actual vs Predicted Traffic Flow')
-        plt.xlabel('Date')
-        plt.ylabel('Traffic Flow (cars)')
-        plt.legend()
-        plt.tight_layout()
-        plt.show()
+        # Create plot figure only if requested
+        fig = None
+        if create_plot:
+            fig, ax = plt.subplots(figsize=(12, 6))
+            ax.plot(dates_test, y_test, label='Actual Flow')
+            ax.plot(dates_test, predictions, label=f'{self.model_name} Predicted Flow')
+            ax.set_title(f'{self.model_name}: Actual vs Predicted Traffic Flow')
+            ax.set_xlabel('Date')
+            ax.set_ylabel('Traffic Flow (cars)')
+            ax.legend()
+            fig.tight_layout()
         
-        return rmse, predictions 
+        return rmse, predictions, fig
 
     def predict(self, data, target_datetime, distance_km):
         if self.model is None:
